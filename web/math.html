@@ -1,0 +1,203 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Math · Black-Scholes</title>
+<meta name="description" content="The equations behind the site: the model, the PDE, the closed form, every Greek, and the numerical methods.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>σ</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/vendor/katex/katex.min.css">
+<style>
+.article{max-width:720px;margin:0 auto;padding-bottom:80px}
+.article h2{font-size:20px;font-weight:600;letter-spacing:-.02em;margin:48px 0 10px;line-height:1.2}
+.article h2:first-of-type{margin-top:36px}
+.article p,.article li{color:var(--text-2);margin:0 0 10px}
+.article ul{padding-left:20px;margin:0 0 10px}
+.article li{margin-bottom:4px}
+.toc ol{margin:0;padding-left:22px;columns:2;column-gap:24px;font-size:13.5px}
+.toc li{margin:2px 0;break-inside:avoid}
+.toc a{color:var(--text-2);text-decoration:none}
+.toc a:hover{color:var(--text)}
+@media (max-width:520px){.toc ol{columns:1}}
+.katex{font-size:1.05em;color:var(--text)}
+.katex-display{overflow-x:auto;overflow-y:hidden;padding:6px 0;margin:14px 0}
+.tbl{overflow-x:auto;margin:14px 0 8px}
+.tbl table.data th,.tbl table.data td{text-align:left;vertical-align:top}
+.tbl table.data td:first-child{color:var(--text-2);white-space:nowrap}
+.article .note{margin-top:8px}
+.article .card.end{margin-top:48px}
+</style>
+</head><body><div class="wrap">
+  <section class="page-head"><h1>The math</h1><p>Everything the site computes, written out once, in the same notation and sign conventions as the code.</p></section>
+  <main class="article">
+    <div class="card pad toc">
+      <div class="card-title" style="margin-bottom:8px">Contents</div>
+      <ol>
+        <li><a href="#setup">Setup and assumptions</a></li>
+        <li><a href="#underlying">The underlying</a></li>
+        <li><a href="#pde">The hedged portfolio and the PDE</a></li>
+        <li><a href="#solution">Closed-form solution</a></li>
+        <li><a href="#parity">Put–call parity</a></li>
+        <li><a href="#first">First-order Greeks</a></li>
+        <li><a href="#second">Second-order Greeks</a></li>
+        <li><a href="#third">Third-order Greeks</a></li>
+        <li><a href="#iv">Implied volatility</a></li>
+        <li><a href="#binomial">Binomial tree</a></li>
+        <li><a href="#fd">Finite differences</a></li>
+        <li><a href="#mc">Monte Carlo</a></li>
+        <li><a href="#prob">Probabilities</a></li>
+      </ol>
+    </div>
+
+    <article id="content">
+    <h2 id="setup">1. Setup and assumptions</h2>
+    <p>The model needs a short list of things to be true. None of them are, exactly, but the price you get is still the market's common language.</p>
+    <ul>
+      <li>The spot price \(S\) follows a lognormal geometric Brownian motion with constant volatility \(\sigma\).</li>
+      <li>The risk-free rate \(r\) and the continuous dividend yield \(q\) are constant.</li>
+      <li>Trading is continuous, in any size, with no transaction costs, taxes or short-sale limits.</li>
+      <li>The option is European: it can only be exercised at expiry \(T\).</li>
+      <li>\(N(\cdot)\) is the standard normal CDF and \(\phi(\cdot)\) its density. \(t\) is calendar time, so \(\partial_t\) means "as time passes".</li>
+    </ul>
+
+    <h2 id="underlying">2. The underlying</h2>
+    <p>Under the real-world measure the stock drifts at some \(\mu\) and pays out \(q\):</p>
+    $$dS = (\mu - q)\,S\,dt + \sigma S\,dW .$$
+    <p>Itô's lemma on \(\ln S\) turns the multiplicative noise into additive noise, and picks up the \(-\tfrac12\sigma^2\) correction:</p>
+    $$d\ln S = \left(\mu - q - \tfrac12\sigma^2\right)dt + \sigma\,dW .$$
+    <p>Pricing replaces \(\mu\) with \(r\) (the risk-neutral measure), so the terminal price is lognormal with a known mean and variance:</p>
+    $$S_T = S_0 \exp\!\left(\left(r - q - \tfrac12\sigma^2\right)T + \sigma\sqrt{T}\,Z\right),\qquad Z \sim N(0,1).$$
+    <p>This is the line the Monte Carlo and the sample-path drawings use directly.</p>
+
+    <h2 id="pde">3. The hedged portfolio and the PDE</h2>
+    <p>Hold one option \(V(S,t)\) and short \(\Delta\) shares. Itô on \(V\) gives its change over \(dt\):</p>
+    $$dV = \partial_t V\,dt + \partial_S V\,dS + \tfrac12\sigma^2 S^2\,\partial_{SS}V\,dt .$$
+    <p>The portfolio \(\Pi = V - \Delta S\) (the short stock also owes the dividend \(q\Delta S\,dt\)) moves by</p>
+    $$d\Pi = dV - \Delta\,dS - q\Delta S\,dt .$$
+    <p>Choosing \(\Delta = \partial_S V\) kills the \(dW\) term, so \(\Pi\) is riskless over \(dt\) and must earn \(r\Pi\,dt\). Equating the two:</p>
+    $$\partial_t V + \tfrac12\sigma^2 S^2\,\partial_{SS}V + (r - q)\,S\,\partial_S V - rV = 0 .$$
+    <p>Note \(\mu\) has dropped out. The equation is solved backwards from the payoff at \(T\):</p>
+    $$C(S,T) = \max(S-K,0),\qquad P(S,T) = \max(K-S,0),$$
+    $$C(0,t)=0,\quad C(S,t)\to S e^{-q(T-t)} - K e^{-r(T-t)}\ \text{as}\ S\to\infty,$$
+    $$P(0,t)=K e^{-r(T-t)},\quad P(S,t)\to 0\ \text{as}\ S\to\infty .$$
+
+    <h2 id="solution">4. Closed-form solution</h2>
+    <p>With \(T\) now meaning time left to expiry, define</p>
+    $$d_1 = \frac{\ln(S/K) + \left(r - q + \tfrac12\sigma^2\right)T}{\sigma\sqrt{T}},\qquad d_2 = d_1 - \sigma\sqrt{T}.$$
+    <p>Then</p>
+    $$C = S e^{-qT} N(d_1) - K e^{-rT} N(d_2),$$
+    $$P = K e^{-rT} N(-d_2) - S e^{-qT} N(-d_1).$$
+    <p>\(N(d_2)\) is the risk-neutral probability of finishing in the money, and \(e^{-qT}N(d_1)\) is the call's delta. When \(T=0\) or \(\sigma=0\) the code returns the discounted intrinsic value \(\max(\pm(Se^{-qT}-Ke^{-rT}),0)\) and zero for every Greek.</p>
+
+    <h2 id="parity">5. Put–call parity</h2>
+    <p>A long call and a short put with the same strike is a forward, so no model is needed for this one:</p>
+    $$C - P = S e^{-qT} - K e^{-rT}.$$
+    <p>Differentiating it is a quick check on the Greek tables below: \(\Delta_C - \Delta_P = e^{-qT}\), and gamma, vega, vanna, vomma, veta, speed, zomma, color and ultima are identical for the call and the put.</p>
+
+    <h2 id="first">6. First-order Greeks</h2>
+    <p>Raw partial derivatives, per year and per unit of \(\sigma\), \(r\) or \(q\) (1.0 = 100%).</p>
+    <div class="tbl"><table class="data">
+      <thead><tr><th>Name</th><th>Call</th><th>Put</th></tr></thead>
+      <tbody>
+        <tr><td>Delta \(\partial_S V\)</td><td>\(e^{-qT} N(d_1)\)</td><td>\(e^{-qT}\left(N(d_1) - 1\right)\)</td></tr>
+        <tr><td>Theta \(\partial_t V\)</td><td>\(-\dfrac{S e^{-qT}\phi(d_1)\sigma}{2\sqrt{T}} - rKe^{-rT}N(d_2) + qSe^{-qT}N(d_1)\)</td><td>\(-\dfrac{S e^{-qT}\phi(d_1)\sigma}{2\sqrt{T}} + rKe^{-rT}N(-d_2) - qSe^{-qT}N(-d_1)\)</td></tr>
+        <tr><td>Vega \(\partial_\sigma V\)</td><td>\(S e^{-qT}\phi(d_1)\sqrt{T}\)</td><td>same</td></tr>
+        <tr><td>Rho \(\partial_r V\)</td><td>\(K T e^{-rT} N(d_2)\)</td><td>\(-K T e^{-rT} N(-d_2)\)</td></tr>
+        <tr><td>Epsilon \(\partial_q V\)</td><td>\(-S T e^{-qT} N(d_1)\)</td><td>\(S T e^{-qT} N(-d_1)\)</td></tr>
+        <tr><td>Lambda</td><td>\(\Delta\, S / V\)</td><td>same form</td></tr>
+        <tr><td>Dual delta \(\partial_K V\)</td><td>\(-e^{-rT} N(d_2)\)</td><td>\(e^{-rT} N(-d_2)\)</td></tr>
+      </tbody>
+    </table></div>
+    <p>The site quotes these in trader units: theta is divided by 365 (per calendar day), and vega, rho and epsilon are multiplied by 0.01 (per one percentage point). Lambda and the deltas are shown raw. Theta is \(\partial_t V\) with \(t\) running forward, so it is negative for a long option that is losing time value.</p>
+
+    <h2 id="second">7. Second-order Greeks</h2>
+    <p>Gamma, vanna, vomma, veta and dual gamma are the same for call and put. Charm differs only by the \(q\) term.</p>
+    <div class="tbl"><table class="data">
+      <thead><tr><th>Name</th><th>Call</th><th>Put</th></tr></thead>
+      <tbody>
+        <tr><td>Gamma \(\partial_{SS} V\)</td><td>\(\Gamma = \dfrac{e^{-qT}\phi(d_1)}{S\sigma\sqrt{T}}\)</td><td>same</td></tr>
+        <tr><td>Vanna \(\partial_{S\sigma} V\)</td><td>\(-e^{-qT}\phi(d_1)\,\dfrac{d_2}{\sigma}\)</td><td>same</td></tr>
+        <tr><td>Charm \(\partial_t \Delta\)</td><td>\(q e^{-qT}N(d_1) - e^{-qT}\phi(d_1)\,\dfrac{2(r-q)T - d_2\sigma\sqrt{T}}{2T\sigma\sqrt{T}}\)</td><td>\(-q e^{-qT}N(-d_1) - e^{-qT}\phi(d_1)\,\dfrac{2(r-q)T - d_2\sigma\sqrt{T}}{2T\sigma\sqrt{T}}\)</td></tr>
+        <tr><td>Vomma \(\partial_{\sigma\sigma} V\)</td><td>\(\nu\,\dfrac{d_1 d_2}{\sigma}\)</td><td>same</td></tr>
+        <tr><td>Veta \(\partial_t \nu\)</td><td>\(S e^{-qT}\phi(d_1)\sqrt{T}\left(q + \dfrac{(r-q)\,d_1}{\sigma\sqrt{T}} - \dfrac{1 + d_1 d_2}{2T}\right)\)</td><td>same</td></tr>
+        <tr><td>Dual gamma \(\partial_{KK} V\)</td><td>\(\dfrac{e^{-rT}\phi(d_2)}{K\sigma\sqrt{T}}\)</td><td>same</td></tr>
+      </tbody>
+    </table></div>
+    <p>Quoted units: charm per day (÷365), vanna per 1% of vol (×0.01), vomma per 1%² (×10⁻⁴), veta per 1% per day (×0.01/365). Gamma and dual gamma are raw. \(\nu\) is the raw vega from the table above.</p>
+
+    <h2 id="third">8. Third-order Greeks</h2>
+    <p>All four are the same for call and put. \(\Gamma\) and \(\nu\) are the raw gamma and vega.</p>
+    <div class="tbl"><table class="data">
+      <thead><tr><th>Name</th><th>Formula</th></tr></thead>
+      <tbody>
+        <tr><td>Speed \(\partial_S \Gamma\)</td><td>\(-\dfrac{\Gamma}{S}\left(\dfrac{d_1}{\sigma\sqrt{T}} + 1\right)\)</td></tr>
+        <tr><td>Zomma \(\partial_\sigma \Gamma\)</td><td>\(\Gamma\,\dfrac{d_1 d_2 - 1}{\sigma}\)</td></tr>
+        <tr><td>Color \(\partial_t \Gamma\)</td><td>\(\dfrac{e^{-qT}\phi(d_1)}{2ST\sigma\sqrt{T}}\left(2qT + 1 + \dfrac{2(r-q)T - d_2\sigma\sqrt{T}}{\sigma\sqrt{T}}\,d_1\right)\)</td></tr>
+        <tr><td>Ultima \(\partial_\sigma \text{vomma}\)</td><td>\(-\dfrac{\nu}{\sigma^2}\left(d_1 d_2\,(1 - d_1 d_2) + d_1^2 + d_2^2\right)\)</td></tr>
+      </tbody>
+    </table></div>
+    <p>Quoted units: color per day (÷365), zomma per 1% (×0.01), ultima per 1%³ (×10⁻⁶). Speed is raw.</p>
+
+    <h2 id="iv">9. Implied volatility</h2>
+    <p>Given a market price \(V_{mkt}\), find the \(\sigma\) that the formula maps to it. Newton's method uses vega as the slope:</p>
+    $$\sigma_{n+1} = \sigma_n - \frac{V(\sigma_n) - V_{mkt}}{\nu(\sigma_n)} .$$
+    <p>The starting guess is the Brenner–Subrahmanyam approximation \(\sigma_0 \approx \sqrt{2\pi/T}\;V_{mkt}/S\). Deep in or out of the money vega goes to zero, so a Newton step can shoot off to a nonsense value. The code keeps a bracket \([\sigma_{lo},\sigma_{hi}]\) that always contains the root, tightens it after every evaluation, and falls back to the bisection midpoint whenever the Newton step lands outside it. It stops when \(|V(\sigma_n) - V_{mkt}| < 10^{-8}\) or after 60 iterations, and refuses prices below intrinsic or above what \(\sigma = 500\%\) can produce.</p>
+
+    <h2 id="binomial">10. Binomial tree (CRR)</h2>
+    <p>Split \(T\) into \(n\) steps of \(\Delta t = T/n\). Each step the price goes up by \(u\) or down by \(d\):</p>
+    $$u = e^{\sigma\sqrt{\Delta t}},\qquad d = \frac{1}{u},\qquad p = \frac{e^{(r-q)\Delta t} - d}{u - d} .$$
+    <p>Fill the last column with payoffs and roll back one step at a time, discounting the risk-neutral expectation:</p>
+    $$V_{n,i} = \max(\pm(S u^i d^{\,n-i} - K), 0),\qquad V_{k,i} = e^{-r\Delta t}\left(p\,V_{k+1,i+1} + (1-p)\,V_{k+1,i}\right).$$
+    <p>For an American option compare with immediate exercise at every node:</p>
+    $$V_{k,i} = \max\!\left(e^{-r\Delta t}\left(p\,V_{k+1,i+1} + (1-p)\,V_{k+1,i}\right),\ \text{payoff}(S u^i d^{\,k-i})\right).$$
+    <p>The tree's log-returns have the right mean and variance to first order in \(\Delta t\), so as \(\Delta t \to 0\) the European price converges to Black–Scholes, with an oscillating error that shrinks like \(1/n\).</p>
+
+    <h2 id="fd">11. Finite differences</h2>
+    <p>Work in time to expiry \(\tau = T - t\), so the PDE runs forward from the payoff. Put the grid on \(S_j = j\,\Delta S\) for \(j = 0,\dots,M\) with \(S_{max} = 4\max(S,K)\), and write \(V_j^n\) for the value at \(S_j\) and \(\tau_n = n\,\Delta\tau\). Central differences in \(S\) give the operator</p>
+    $$\mathcal{L}V_j = \tfrac12\sigma^2 j^2\,(V_{j+1} - 2V_j + V_{j-1}) + \tfrac12(r-q)\,j\,(V_{j+1} - V_{j-1}) - rV_j .$$
+    <p>Crank–Nicolson averages it between the old and new time levels, \(V^{n+1} - V^n = \tfrac12\Delta\tau\,(\mathcal{L}V^{n+1} + \mathcal{L}V^n)\). Collecting terms with</p>
+    $$a_j = \tfrac14\Delta\tau\left(\sigma^2 j^2 - (r-q)j\right),\quad b_j = -\tfrac12\Delta\tau\left(\sigma^2 j^2 + r\right),\quad c_j = \tfrac14\Delta\tau\left(\sigma^2 j^2 + (r-q)j\right)$$
+    <p>gives one tridiagonal system per time step:</p>
+    $$-a_j V_{j-1}^{n+1} + (1 - b_j)\,V_j^{n+1} - c_j V_{j+1}^{n+1} = a_j V_{j-1}^{n} + (1 + b_j)\,V_j^{n} + c_j V_{j+1}^{n}.$$
+    <p>The Thomas algorithm solves it in \(O(M)\). The boundaries are the closed-form limits from section 3, so they are exact at every step:</p>
+    $$C_0^n = 0,\quad C_M^n = S_{max}e^{-q\tau_n} - Ke^{-r\tau_n},\qquad P_0^n = Ke^{-r\tau_n},\quad P_M^n = 0 .$$
+    <p>The price at the input spot is a linear interpolation between the two grid nodes around it. The scheme is second-order in both \(\Delta S\) and \(\Delta\tau\) and unconditionally stable.</p>
+
+    <h2 id="mc">12. Monte Carlo</h2>
+    <p>Draw \(Z_i \sim N(0,1)\), map each to a terminal price with the formula from section 2, and average the discounted payoffs:</p>
+    $$\hat V = \frac{e^{-rT}}{n}\sum_{i=1}^{n} \text{payoff}(S_T^{(i)}) .$$
+    <p>The code uses antithetic variates: every draw \(Z\) is paired with \(-Z\), and the pair's average payoff is one sample. The two are negatively correlated, so the variance of each sample drops for free:</p>
+    $$X_i = \tfrac12 e^{-rT}\left(\text{payoff}(S_T(Z_i)) + \text{payoff}(S_T(-Z_i))\right),\qquad \hat V = \frac{2}{n}\sum_{i=1}^{n/2} X_i .$$
+    <p>The standard error is the sample standard deviation of the \(X_i\) over the square root of their count, so it shrinks like \(1/\sqrt{n}\). Four times the paths buys one more bit of precision.</p>
+    $$\text{SE} = \sqrt{\frac{\operatorname{Var}(X)}{n/2}} \;\propto\; \frac{1}{\sqrt{n}} .$$
+
+    <h2 id="prob">13. Probabilities</h2>
+    <p>These are the numbers on the analytics page. All are under the risk-neutral measure, so they are the probabilities the price implies, not a forecast.</p>
+    <p>Finishing above the strike:</p>
+    $$P(S_T > K) = N(d_2),\qquad P(S_T < K) = N(-d_2).$$
+    <p>The one-standard-deviation expected move, in price units:</p>
+    $$\text{expected move} = S\,\sigma\sqrt{T}.$$
+    <p>The probability of touching the strike at any time before expiry, from the reflection principle for a driftless Brownian motion:</p>
+    $$P(\text{touch}) = 2\,N\!\left(-\frac{\left|\ln(K/S)\right|}{\sigma\sqrt{T}}\right).$$
+    <p>This ignores the drift \(r - q - \tfrac12\sigma^2\), which is a fair approximation when \(\sigma\sqrt{T}\) is large relative to it. It is roughly twice the probability of finishing beyond the strike.</p>
+    <p>The density of \(S_T\) is lognormal. With</p>
+    $$\mu = \ln S + \left(r - q - \tfrac12\sigma^2\right)T,$$
+    <p>it is</p>
+    $$f(x) = \frac{1}{x\,\sigma\sqrt{T}}\,\phi\!\left(\frac{\ln x - \mu}{\sigma\sqrt{T}}\right),\qquad x > 0 .$$
+    <p>Its median is \(e^{\mu}\), its mean is the forward \(S e^{(r-q)T}\), and the 68% and 95% ranges are \(e^{\mu \pm z\,\sigma\sqrt{T}}\) with \(z\) the matching normal quantile.</p>
+    </article>
+
+    <div class="card pad end"><div class="note">These formulas match <code>assets/bs.js</code> and the Python package line for line, including the sign conventions: theta, charm, color and veta are derivatives with respect to calendar time moving forward, and vanna, vomma, zomma and ultima are per unit of \(\sigma\) before the quoting scale is applied.</div></div>
+  </main>
+</div>
+<script src="assets/bs.js"></script><script src="assets/chart.js"></script><script src="assets/ui.js"></script>
+<script src="assets/vendor/katex/katex.min.js"></script>
+<script src="assets/vendor/katex/contrib/auto-render.min.js"></script>
+<script>
+UI.nav('math');
+if (window.renderMathInElement) renderMathInElement(document.querySelector('.article'), {
+  delimiters: [{ left: '$$', right: '$$', display: true }, { left: '\\(', right: '\\)', display: false }],
+  throwOnError: false, output: 'html',
+});
+</script>
+</body></html>
