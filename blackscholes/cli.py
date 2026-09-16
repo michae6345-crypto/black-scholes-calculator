@@ -17,9 +17,9 @@ def main(argv=None) -> None:
     args = p.parse_args(argv)
 
     o = Option(args.spot, args.strike, args.rate, args.vol, args.time, args.dividend)
-    print(f"price  {price(o, args.kind):.4f}")
+    print(f"{'price':<10} {price(o, args.kind):.4f}")
     for name, value in all_greeks(o, args.kind).items():
-        print(f"{name:<6} {value:.4f}")
+        print(f"{name:<10} {value:.4f}")
 
 
 if __name__ == "__main__":

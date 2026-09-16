@@ -1,4 +1,23 @@
-from .greeks import all_greeks, delta, gamma, rho, theta, vega
+from .greeks import (
+    all_greeks,
+    charm,
+    color,
+    delta,
+    dual_delta,
+    dual_gamma,
+    epsilon,
+    gamma,
+    lambda_,
+    rho,
+    speed,
+    theta,
+    ultima,
+    vanna,
+    vega,
+    veta,
+    vomma,
+    zomma,
+)
 from .implied_vol import implied_vol
 from .option import Option
 from .pde import pde_price
@@ -16,6 +35,18 @@ __all__ = [
     "theta",
     "vega",
     "rho",
+    "epsilon",
+    "lambda_",
+    "vanna",
+    "charm",
+    "vomma",
+    "veta",
+    "dual_delta",
+    "dual_gamma",
+    "speed",
+    "zomma",
+    "color",
+    "ultima",
     "all_greeks",
     "implied_vol",
     "pde_price",
