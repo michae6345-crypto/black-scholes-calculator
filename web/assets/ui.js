@@ -90,7 +90,7 @@
 
   const fmt = (x, d = 4) => Number.isFinite(x) ? x.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : (x === Infinity ? 'Unlimited' : x === -Infinity ? 'Unlimited' : '—');
   const pct = (x, d = 1) => Number.isFinite(x) ? (x * 100).toFixed(d) + '%' : '—';
-  const money = (x, d = 2) => Number.isFinite(x) ? (x < 0 ? '−' : '') + Math.abs(x).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : (x === Infinity ? 'Unlimited' : x === -Infinity ? 'Unlimited' : '—');
+  const money = (x, d = 2) => Number.isFinite(x) ? (x < 0 && Math.round(Math.abs(x) * 10 ** d) > 0 ? '−' : '') + Math.abs(x).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d }) : (x === Infinity ? 'Unlimited' : x === -Infinity ? 'Unlimited' : '—');
   const inputsOf = st => ({ S: st.S, K: st.K, r: st.r, q: st.q, v: st.v, T: st.T });
   const debounce = (fn, ms = 120) => { let h; return (...a) => { clearTimeout(h); h = setTimeout(() => fn(...a), ms); }; };
 

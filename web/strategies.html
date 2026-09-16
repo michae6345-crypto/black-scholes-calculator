@@ -1,0 +1,312 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Strategies · Black-Scholes</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>σ</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<style>
+.legs{display:flex;flex-direction:column}
+.leg{display:grid;grid-template-columns:104px 1fr 1.2fr 1.7fr 34px;gap:10px;align-items:end;padding:10px 0;border-bottom:1px solid var(--line)}
+.leg:first-child{padding-top:0}
+.leg .cell{display:flex;flex-direction:column;gap:3px;min-width:0}
+.leg .cell small{font-size:11px;color:var(--text-3);font-weight:500}
+.leg .cell .in{display:flex;align-items:center;gap:6px}
+.leg input[type=number]{width:100%;min-width:0}
+.leg select{width:100%}
+.leg .pill{flex:none}
+#tiles{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:640px){#tiles{grid-template-columns:repeat(2,minmax(0,1fr))}.leg{grid-template-columns:1fr 1.3fr 34px}.leg .c1{grid-area:1/1}.leg .c2{grid-area:1/2}.leg .rm{grid-area:1/3}.leg .c3{grid-area:2/1}.leg .c4{grid-area:2/2/3/4}}
+.ctrls{display:flex;gap:18px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--text-2);margin:4px 0 12px}
+.ctrls span{display:inline-flex;align-items:center;gap:8px}
+.ctrls input[type=range]{width:130px;margin:0}
+.ctrls b{font-weight:500;color:var(--text);min-width:3.5ch}
+.side-actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap}
+#inputs select{width:100%;margin-top:6px}
+.empty{font-size:13px;color:var(--text-3);padding:12px 0}
+</style>
+</head><body><div class="wrap">
+  <section class="page-head"><h1>Strategy builder</h1><p>Combine calls, puts and stock into one position with a shared expiry, priced with the same model as the other pages.</p></section>
+  <main class="layout">
+    <aside class="card pad sticky" id="inputs"></aside>
+    <div class="stack">
+      <div class="card pad">
+        <div class="card-head"><div class="card-title">Legs <span id="legs-count"></span></div><button class="btn sm" id="add-leg">Add leg</button></div>
+        <div class="legs" id="legs"></div>
+        <div class="note" style="margin-top:10px">Negative quantity is a short leg. Premium starts at the model price; type what you actually paid to see your own P&amp;L.</div>
+      </div>
+
+      <div class="tiles" id="tiles"></div>
+
+      <div class="card pad">
+        <div class="card-head"><div class="card-title">Profit and loss <span>vs underlying price</span></div></div>
+        <div class="ctrls">
+          <span>Days forward <b class="mono" id="days-val">0</b><input type="range" id="days" min="0" max="365" step="1" value="0" aria-label="Days forward"></span>
+          <span><label class="check"><input type="checkbox" id="vs-on"> Vol shift</label><b class="mono" id="vs-val">+0%</b><input type="range" id="vs" min="-20" max="20" step="1" value="0" aria-label="Vol shift"></span>
+        </div>
+        <div id="pnl-chart"></div>
+        <div class="note" style="margin-top:8px">Green is profit, red is loss, at expiry. The other lines are the model value before expiry.</div>
+      </div>
+
+      <div class="card pad">
+        <div class="card-head"><div class="card-title">P&amp;L over time</div></div>
+        <div id="heat"></div>
+        <div class="note" style="margin-top:6px">Same position, walked forward in time.</div>
+      </div>
+
+      <div class="card pad">
+        <div class="card-head"><div class="card-title">Position Greeks <span>across spot</span></div><div class="seg sm" id="greek-seg" role="group" aria-label="Greek"></div></div>
+        <div id="greek-chart"></div>
+        <div class="note" style="margin-top:8px" id="greek-note"></div>
+        <div class="scroll" style="margin-top:16px" id="greek-table"></div>
+      </div>
+
+      <div class="card pad">
+        <div class="card-head"><div class="card-title">Payoff table</div></div>
+        <div class="scroll" id="payoff-table"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="assets/bs.js"></script><script src="assets/chart.js"></script><script src="assets/ui.js"></script>
+<script>
+UI.nav('strategies');
+const state = UI.loadState();
+const $ = id => document.getElementById(id);
+const round5 = x => Math.round(x * 2) / 2;
+const legName = l => `${l.qty < 0 ? 'Short' : 'Long'} ${Math.abs(l.qty)} ${l.kind}${l.kind === 'stock' ? '' : ' ' + UI.money(l.strike, 2)}`;
+
+const ui = { preset: 'iron-condor', width: 0.05, days: 0, vsOn: false, vs: 0, greek: 'delta', legs: [] };
+
+function presetLegs(id) {
+  return BS.PRESETS[id].legs(state.S, ui.width).map(l => ({ kind: l.kind, strike: l.kind === 'stock' ? null : round5(l.strike), qty: l.qty, premium: null }));
+}
+function encodeLegs() {
+  return ui.legs.map(l => [l.kind, l.kind === 'stock' ? '' : +l.strike.toFixed(2), l.qty, ...(l.premium == null ? [] : [+l.premium.toFixed(4)])].join(':')).join(',');
+}
+function decodeLegs(s) {
+  const out = [];
+  for (const part of s.split(',')) {
+    const [kind, k, q, p] = part.split(':');
+    if (!['call', 'put', 'stock'].includes(kind)) continue;
+    const strike = parseFloat(k), qty = parseFloat(q), premium = parseFloat(p);
+    if (kind !== 'stock' && !(strike > 0)) continue;
+    if (!Number.isFinite(qty) || qty === 0) continue;
+    out.push({ kind, strike: kind === 'stock' ? null : strike, qty, premium: Number.isFinite(premium) ? premium : null });
+  }
+  return out;
+}
+
+(function init() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem('bs-strategy') || '{}'); } catch {}
+  const u = new URLSearchParams(location.search);
+  if (BS.PRESETS[u.get('preset')]) ui.preset = u.get('preset'); else if (saved.preset === '' || BS.PRESETS[saved.preset]) ui.preset = saved.preset;
+  const w = parseFloat(u.has('width') ? u.get('width') : saved.width);
+  if (w >= 0.01 && w <= 0.2) ui.width = w;
+  if (u.has('legs')) { ui.legs = decodeLegs(u.get('legs')); ui.preset = ''; }
+  else if (Array.isArray(saved.legs) && saved.legs.length) ui.legs = decodeLegs(saved.legs.join(','));
+  if (!ui.legs.length) { if (!ui.preset) ui.preset = 'iron-condor'; ui.legs = presetLegs(ui.preset); }
+  const maxDays = Math.floor(state.T * 365);
+  const d = parseInt(u.has('days') ? u.get('days') : saved.days, 10);
+  ui.days = Number.isFinite(d) ? Math.max(0, Math.min(maxDays, d)) : Math.round(maxDays / 2);
+})();
+
+function persist() {
+  UI.saveState(state);
+  const u = new URLSearchParams(location.search);
+  u.set('legs', encodeLegs()); u.set('preset', ui.preset); u.set('width', ui.width); u.set('days', ui.days);
+  history.replaceState(null, '', '?' + u.toString());
+  try { localStorage.setItem('bs-strategy', JSON.stringify({ legs: encodeLegs().split(','), preset: ui.preset, width: ui.width, days: ui.days })); } catch {}
+}
+
+const inputs = UI.inputs($('inputs'), state, id => { if (id === 'T') syncDays(); render(); }, ['S', 'T', 'v', 'r', 'q']);
+{
+  const wrap = document.createElement('div'); wrap.className = 'field';
+  wrap.innerHTML = `<div class="row"><label for="preset">Preset</label></div><select id="preset"><option value="">Custom</option>${Object.entries(BS.PRESETS).map(([id, p]) => `<option value="${id}">${p.name}</option>`).join('')}</select>`;
+  $('inputs').appendChild(wrap);
+  const wf = document.createElement('div'); wf.className = 'field';
+  wf.innerHTML = `<div class="row"><label for="n-width">Width</label><span class="num"><input id="n-width" type="number" step="0.5" min="1" max="20" value="${+(ui.width * 100).toFixed(2)}"><em>%</em></span></div>
+    <input id="s-width" type="range" min="1" max="20" step="0.5" value="${ui.width * 100}" aria-label="Width">`;
+  $('inputs').appendChild(wf);
+  const act = document.createElement('div'); act.className = 'side-actions';
+  act.innerHTML = `<button class="btn sm" id="share">Copy link</button>`;
+  $('inputs').appendChild(act);
+  const note = document.createElement('div'); note.className = 'note'; note.style.marginTop = '12px';
+  note.textContent = 'Width sets how far a preset places its strikes from spot. Picking a preset replaces the legs.';
+  $('inputs').appendChild(note);
+
+  $('preset').value = ui.preset;
+  $('preset').onchange = () => { ui.preset = $('preset').value; if (ui.preset) { ui.legs = presetLegs(ui.preset); buildLegs(); } render(); };
+  const setWidth = v => { if (!(v >= 1 && v <= 20)) return; ui.width = v / 100; if (ui.preset) { ui.legs = presetLegs(ui.preset); buildLegs(); } render(); };
+  $('s-width').addEventListener('input', () => { $('n-width').value = $('s-width').value; setWidth(+$('s-width').value); });
+  $('n-width').addEventListener('input', () => { const v = parseFloat($('n-width').value); $('s-width').value = v; setWidth(v); });
+  $('share').onclick = UI.shareLink;
+}
+
+function syncDays() {
+  const max = Math.floor(state.T * 365);
+  $('days').max = max;
+  ui.days = Math.min(ui.days, max);
+  $('days').value = ui.days;
+  $('days-val').textContent = ui.days;
+}
+$('days').addEventListener('input', () => { ui.days = +$('days').value; $('days-val').textContent = ui.days; render(); });
+$('vs-on').onchange = () => { ui.vsOn = $('vs-on').checked; render(); };
+$('vs').addEventListener('input', () => { ui.vs = +$('vs').value; if (!ui.vsOn) { ui.vsOn = true; $('vs-on').checked = true; } render(); });
+
+function markCustom() { ui.preset = ''; $('preset').value = ''; }
+
+function buildLegs() {
+  const box = $('legs'); box.innerHTML = '';
+  if (!ui.legs.length) box.innerHTML = '<div class="empty">No legs yet. Add one or pick a preset.</div>';
+  ui.legs.forEach((leg, i) => {
+    const row = document.createElement('div'); row.className = 'leg'; row.dataset.i = i;
+    row.innerHTML = `
+      <div class="cell c1"><small>Type</small><select data-f="kind"><option value="call">Call</option><option value="put">Put</option><option value="stock">Stock</option></select></div>
+      <div class="cell c2"><small>Strike</small><input type="number" data-f="strike" step="0.5" min="0.5"></div>
+      <div class="cell c3"><small>Qty</small><div class="in"><input type="number" data-f="qty" step="1"><span class="pill"></span></div></div>
+      <div class="cell c4"><small>Premium</small><div class="in"><input type="number" data-f="premium" step="0.01"><button class="btn sm" data-f="model" title="Reset to model price">model</button></div></div>
+      <button class="icon-btn rm" aria-label="Remove leg" title="Remove leg">✕</button>`;
+    box.appendChild(row);
+    const kindEl = row.querySelector('[data-f=kind]'), kEl = row.querySelector('[data-f=strike]'), qEl = row.querySelector('[data-f=qty]'), pEl = row.querySelector('[data-f=premium]');
+    kindEl.value = leg.kind; kEl.value = leg.strike ?? ''; qEl.value = leg.qty;
+    kEl.disabled = leg.kind === 'stock';
+    kindEl.onchange = () => { leg.kind = kindEl.value; if (leg.kind === 'stock') { leg.strike = null; kEl.value = ''; } else if (leg.strike == null) { leg.strike = round5(state.S); kEl.value = leg.strike; } kEl.disabled = leg.kind === 'stock'; leg.premium = null; markCustom(); render(); };
+    kEl.addEventListener('input', () => { const v = parseFloat(kEl.value); if (v > 0) { leg.strike = v; leg.premium = null; markCustom(); render(); } });
+    qEl.addEventListener('input', () => { const v = parseFloat(qEl.value); if (Number.isFinite(v) && v !== 0) { leg.qty = v; markCustom(); render(); } });
+    pEl.addEventListener('input', () => { const v = parseFloat(pEl.value); if (v >= 0) { leg.premium = v; markCustom(); render(); } });
+    row.querySelector('[data-f=model]').onclick = () => { leg.premium = null; markCustom(); render(); };
+    row.querySelector('.rm').onclick = () => { ui.legs.splice(i, 1); markCustom(); buildLegs(); render(); };
+  });
+}
+$('add-leg').onclick = () => { ui.legs.push({ kind: 'call', strike: round5(state.S), qty: 1, premium: null }); markCustom(); buildLegs(); render(); };
+
+function syncLegs(strat) {
+  document.querySelectorAll('#legs .leg').forEach((row, i) => {
+    const leg = ui.legs[i], priced = strat.legs[i];
+    const pill = row.querySelector('.pill'); pill.textContent = leg.qty < 0 ? 'short' : 'long'; pill.className = 'pill ' + (leg.qty < 0 ? 'neg' : 'pos');
+    const pEl = row.querySelector('[data-f=premium]');
+    if (leg.premium == null && document.activeElement !== pEl) pEl.value = priced.premium.toFixed(2);
+    row.querySelector('[data-f=model]').disabled = leg.premium == null;
+  });
+  $('legs-count').textContent = ui.legs.length ? `${ui.legs.length} ${ui.legs.length === 1 ? 'leg' : 'legs'}` : '';
+}
+
+const GREEK_IDS = ['delta', 'gamma', 'theta', 'vega'];
+{
+  const seg = $('greek-seg');
+  seg.innerHTML = GREEK_IDS.map(id => `<button data-g="${id}">${BS.metricById(id).name}</button>`).join('');
+  seg.querySelectorAll('button').forEach(b => b.onclick = () => { ui.greek = b.dataset.g; drawGreeks(); });
+}
+function legGreek(leg, o, T, S, id) {
+  if (leg.kind === 'stock') return id === 'delta' ? leg.qty : 0;
+  if (id === 'price') return leg.qty * BS.price({ ...o, S, K: leg.strike, T: Math.max(T, 0), v: leg.vol ?? o.v }, leg.kind).price;
+  return leg.qty * BS.metric(BS.price({ ...o, S, K: leg.strike, T: Math.max(T, 0), v: leg.vol ?? o.v }, leg.kind), id);
+}
+
+let cur = null;
+function compute() {
+  const o = UI.inputsOf(state);
+  const strat = BS.strategy(ui.legs, o);
+  const shift = ui.vsOn ? ui.vs / 100 : 0;
+  const shifted = shift ? BS.strategy(strat.legs.map(l => ({ ...l, vol: Math.max(0, o.v + shift) })), o) : strat;
+  const [lo, hi] = strat.range;
+  const xs = Array.from({ length: 241 }, (_, i) => lo + (hi - lo) * i / 240);
+  cur = { o, strat, shifted, shift, xs, tFwd: Math.max(0, state.T - ui.days / 365) };
+}
+const shiftTag = () => cur.shift ? ` (vol ${cur.shift > 0 ? '+' : '−'}${Math.abs(ui.vs)}%)` : '';
+
+function renderTiles() {
+  const { strat } = cur, g = strat.greeks;
+  const tiles = [
+    { k: strat.cost >= 0 ? 'Net debit' : 'Net credit', v: UI.money(Math.abs(strat.cost)), d: strat.cost >= 0 ? 'paid to open' : 'received to open' },
+    { k: 'Max profit', v: UI.money(strat.maxProfit), cls: strat.maxProfit > 0 ? 'pos' : strat.maxProfit < 0 ? 'neg' : '', d: 'at expiry' },
+    { k: 'Max loss', v: UI.money(strat.maxLoss), cls: strat.maxLoss < 0 ? 'neg' : strat.maxLoss > 0 ? 'pos' : '', d: 'at expiry' },
+    { k: 'Breakevens', v: strat.breakevens.length ? strat.breakevens.map(b => UI.money(b, 2)).join(' / ') : '—', d: 'underlying at expiry' },
+    { k: 'Probability of profit', v: UI.pct(strat.pop, 1), d: 'risk-neutral, at expiry' },
+    { k: 'Net delta', v: UI.fmt(g.delta, 3), sym: 'Δ' },
+    { k: 'Net theta', v: UI.fmt(g.theta * BS.metricById('theta').scale, 3), sym: 'Θ', d: 'per day', cls: g.theta > 0 ? 'pos' : g.theta < 0 ? 'neg' : '' },
+    { k: 'Net vega', v: UI.fmt(g.vega * BS.metricById('vega').scale, 3), sym: 'ν', d: 'per 1% vol' },
+  ];
+  $('tiles').innerHTML = tiles.map(t => `<div class="tile"><div class="k">${t.k}${t.sym ? `<i>${t.sym}</i>` : ''}</div><div class="v mono ${t.cls || ''}" style="${t.k === 'Breakevens' ? 'font-size:15px' : ''}">${t.v}</div>${t.d ? `<div class="d">${t.d}</div>` : ''}</div>`).join('');
+}
+
+function drawPnl() {
+  const { strat, shifted, xs, tFwd } = cur;
+  const series = [
+    { name: 'At expiry', points: xs.map(x => [x, strat.payoff(x)]), width: 2.5, area: 'pnl', color: 'var(--text)' },
+    { name: 'Today' + shiftTag(), points: xs.map(x => [x, shifted.pnlAt(x, state.T)]), color: Chart.color(0) },
+  ];
+  if (ui.days > 0) series.push({ name: `In ${ui.days} days` + shiftTag(), points: xs.map(x => [x, shifted.pnlAt(x, tFwd)]), dash: '4 3', color: Chart.color(2) });
+  Chart.line($('pnl-chart'), {
+    series, height: 360, legend: true, zeroLine: true,
+    x: { label: 'Underlying price', fmt: v => UI.fmt(v, 0) },
+    y: { label: 'P&L', fmt: v => UI.money(v, 0), tipFmt: v => UI.money(v, 2) },
+    vlines: [...strat.breakevens.map(b => ({ x: b, label: 'BE' })), { x: state.S, label: 'S', color: 'var(--s3)' }],
+    markers: strat.legs.filter(l => l.kind !== 'stock').map(l => ({ x: l.strike, y: strat.payoff(l.strike), color: l.kind === 'call' ? 'var(--s1)' : 'var(--s2)' })),
+  });
+}
+
+function drawHeat() {
+  const { strat, shifted } = cur, [lo, hi] = strat.range;
+  const xs = Array.from({ length: 11 }, (_, i) => round5(lo + (hi - lo) * i / 10));
+  const maxD = Math.floor(state.T * 365);
+  const ys = Array.from({ length: 8 }, (_, j) => Math.round(maxD * j / 7));
+  Chart.heatmap($('heat'), {
+    xs, ys, z: ys.map(d => xs.map(x => shifted.pnlAt(x, Math.max(0, state.T - d / 365)))),
+    xFmt: v => UI.fmt(v, 0), yFmt: d => d + 'd', zFmt: v => UI.money(v, 0), xLabel: 'spot', yLabel: 'days from now', diverging: true,
+  });
+}
+
+function drawGreeks() {
+  const { o, strat, xs, tFwd } = cur, id = ui.greek, m = BS.metricById(id);
+  $('greek-seg').querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.g === id));
+  const sum = (S, T) => strat.legs.reduce((s, l) => s + legGreek(l, o, T, S, id), 0);
+  const series = [{ name: `${m.name} now`, points: xs.map(x => [x, sum(x, state.T)]), color: Chart.color(0) }];
+  if (ui.days > 0) series.push({ name: `${m.name} in ${ui.days} days`, points: xs.map(x => [x, sum(x, tFwd)]), dash: '4 3', color: Chart.color(2) });
+  Chart.line($('greek-chart'), {
+    series, height: 260, legend: true, zeroLine: true,
+    x: { label: 'Underlying price', fmt: v => UI.fmt(v, 0) },
+    y: { label: m.name, fmt: v => Chart.short(v), tipFmt: v => UI.fmt(v, 4) },
+    vlines: [{ x: state.S, label: 'S', color: 'var(--s3)' }],
+  });
+  $('greek-note').textContent = `Net ${m.name.toLowerCase()} of the whole position (${m.desc}) as the underlying moves, with time to expiry held fixed.`;
+  const rows = strat.legs.map(l => ({ leg: legName(l), price: legGreek(l, o, state.T, state.S, 'price'), ...Object.fromEntries(GREEK_IDS.map(g => [g, legGreek(l, o, state.T, state.S, g)])) }));
+  const total = { leg: 'Net', price: rows.reduce((s, r) => s + r.price, 0), ...Object.fromEntries(GREEK_IDS.map(g => [g, rows.reduce((s, r) => s + r[g], 0)])) };
+  Chart.table($('greek-table'), {
+    columns: [{ key: 'leg', label: 'Leg' }, { key: 'price', label: 'Value', fmt: v => UI.money(v, 2) }, { key: 'delta', label: 'Δ', fmt: v => UI.fmt(v, 3) }, { key: 'gamma', label: 'Γ', fmt: v => UI.fmt(v, 4) }, { key: 'theta', label: 'Θ/day', fmt: v => UI.fmt(v, 3) }, { key: 'vega', label: 'ν/1%', fmt: v => UI.fmt(v, 3) }],
+    rows: [...rows, total], highlight: r => r.leg === 'Net',
+  });
+}
+
+function drawPayoffTable() {
+  const { strat, shifted, tFwd } = cur;
+  const rows = Array.from({ length: 13 }, (_, i) => { const S = state.S * (0.7 + 0.05 * i); return { S, exp: strat.payoff(S), now: shifted.pnlAt(S, state.T), fwd: shifted.pnlAt(S, tFwd) }; });
+  const cls = v => v > 0.005 ? 'pos' : v < -0.005 ? 'neg' : '';
+  Chart.table($('payoff-table'), {
+    columns: [{ key: 'S', label: 'Spot', fmt: v => UI.money(v, 2) }, { key: 'exp', label: 'At expiry', fmt: v => UI.money(v, 2), cls }, { key: 'now', label: 'Today' + shiftTag(), fmt: v => UI.money(v, 2), cls }, { key: 'fwd', label: `In ${ui.days} days` + shiftTag(), fmt: v => UI.money(v, 2), cls }],
+    rows, highlight: r => Math.abs(r.S - state.S) < 1e-9,
+  });
+}
+
+function drawAll() { drawPnl(); drawHeat(); drawGreeks(); drawPayoffTable(); }
+function render() {
+  $('vs-val').textContent = (ui.vs >= 0 ? '+' : '−') + Math.abs(ui.vs) + '%';
+  $('vs').disabled = !ui.vsOn;
+  compute();
+  syncLegs(cur.strat);
+  renderTiles();
+  drawAll();
+  persist();
+}
+
+const redraw = UI.debounce(() => { if (cur) drawAll(); }, 80);
+addEventListener('resize', redraw);
+addEventListener('themechange', redraw);
+
+syncDays();
+buildLegs();
+render();
+</script>
+</body></html>
