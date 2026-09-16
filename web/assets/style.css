@@ -107,8 +107,8 @@ label.check{display:inline-flex;align-items:center;gap:6px;font-size:14px;color:
 .hero .side b{color:var(--text-2);font-weight:500}
 
 /* stat tiles */
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:1px;background:var(--line);border-radius:var(--radius);overflow:hidden;border:1px solid var(--line)}
-.tile{background:var(--surface);padding:14px 16px;border:0;text-align:left;font:inherit;color:inherit;position:relative;min-width:0}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;background:var(--surface);border-radius:var(--radius);overflow:hidden;border:1px solid var(--line)}
+.tile{background:var(--surface);padding:14px 16px;border:0;border-right:1px solid var(--line);border-bottom:1px solid var(--line);margin:0 -1px -1px 0;text-align:left;font:inherit;color:inherit;position:relative;min-width:0}
 button.tile{cursor:pointer}
 button.tile:hover{background:var(--surface-2)}
 .tile[aria-pressed="true"]::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--s1)}
