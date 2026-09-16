@@ -4,7 +4,7 @@
 <meta name="description" content="Price European options and see every Greek move as you change the inputs.">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>σ</text></svg>">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="assets/style.css">
 <style>
 .hero .pick{background:none;border:0;padding:0;font:inherit;color:inherit;text-align:left;cursor:pointer;border-radius:8px}
@@ -166,7 +166,7 @@ function render() {
   const mine = state.kind === 'call' ? call : put, other = state.kind === 'call' ? put : call;
   const intrinsic = state.kind === 'call' ? Math.max(o.S - o.K, 0) : Math.max(o.K - o.S, 0);
   $('price-label').textContent = state.kind === 'call' ? 'Call price' : 'Put price';
-  $('price').textContent = UI.money(mine.price, 4);
+  UI.animateNumber($('price'), mine.price, v => UI.money(v, 4));
   $('price-sub').innerHTML = `intrinsic <b class="mono">${UI.fmt(intrinsic, 4)}</b> · time value <b class="mono">${UI.fmt(mine.price - intrinsic, 4)}</b> · ${state.kind === 'call' ? 'put' : 'call'} <b class="mono">${UI.fmt(other.price, 4)}</b>`;
   $('side').innerHTML = [['d₁', mine.d1], ['d₂', mine.d2], ['N(d₁)', BS.cdf(mine.d1)], ['N(d₂)', BS.cdf(mine.d2)], ['S/K', o.S / o.K]]
     .map(([k, v]) => `<div>${k} <b class="mono">${UI.fmt(v, 4)}</b></div>`).join('');

@@ -56,6 +56,52 @@
     const f = document.createElement('footer'); f.className = 'bottom';
     f.innerHTML = `<span>European options under Black-Scholes-Merton. Theta, charm, color and veta are per calendar day. Vega, rho, vanna and zomma are per 1%.</span><a href="https://github.com/michae6345-crypto/black-scholes-calculator">Source</a>`;
     document.querySelector('.wrap').append(f);
+    lowercase();
+    reveal();
+  }
+
+  // Lowercases ASCII letters in visible text and keeps Greek, math and code as written.
+  const SKIP = new Set(['SCRIPT', 'STYLE', 'CODE', 'PRE', 'TEXTAREA']);
+  const MATH = /(\$\$[\s\S]*?\$\$|\\\([\s\S]*?\\\)|\\\[[\s\S]*?\\\])/;
+  function lowerNode(node) {
+    if (node.nodeType === 3) {
+      const p = node.parentElement; if (!p || SKIP.has(p.tagName) || p.closest('.katex, .keep')) return;
+      const t = node.nodeValue; if (!/[A-Z]/.test(t)) return;
+      const out = t.split(MATH).map((part, i) => i % 2 ? part : part.replace(/[A-Z]+/g, m => m.toLowerCase())).join('');
+      if (out !== t) node.nodeValue = out;
+      return;
+    }
+    if (node.nodeType !== 1 || SKIP.has(node.tagName) || node.classList?.contains('katex') || node.classList?.contains('keep')) return;
+    if (node.tagName === 'INPUT' && node.placeholder) node.placeholder = node.placeholder.toLowerCase();
+    for (const c of node.childNodes) lowerNode(c);
+  }
+  function lowercase() {
+    lowerNode(document.body);
+    new MutationObserver(ms => { for (const m of ms) { if (m.type === 'characterData') lowerNode(m.target); else m.addedNodes.forEach(lowerNode); } })
+      .observe(document.body, { childList: true, subtree: true, characterData: true });
+  }
+
+  // Cards fade up as they enter the viewport, staggered by order on screen.
+  function reveal() {
+    const items = [...document.querySelectorAll('.card, .tiles, .page-head + * > *:not(.card):not(.tiles)')].filter(el => !el.closest('.card') || el.classList.contains('card'));
+    const targets = [...document.querySelectorAll('main > *, main .stack > *, main .cols > *, article > *, .card.pad.sticky')].filter((el, i, a) => a.indexOf(el) === i && !el.closest('.stack .stack'));
+    targets.forEach(el => el.classList.add('reveal'));
+    if (!('IntersectionObserver' in window)) { targets.forEach(el => el.classList.add('in')); return; }
+    let n = 0;
+    const io = new IntersectionObserver(entries => {
+      entries.forEach(e => { if (!e.isIntersecting) return; const el = e.target; el.style.transitionDelay = Math.min(n++ * 60, 360) + 'ms'; el.classList.add('in'); io.unobserve(el); setTimeout(() => { n = Math.max(0, n - 1); }, 400); });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
+    targets.forEach(el => io.observe(el));
+  }
+
+  // Tweens a displayed number from its previous value to the new one.
+  function animateNumber(el, value, fmtFn, ms = 380) {
+    if (!Number.isFinite(value)) { el.textContent = fmtFn(value); el._val = value; return; }
+    const from = Number.isFinite(el._val) ? el._val : value; el._val = value;
+    if (from === value || matchMedia('(prefers-reduced-motion: reduce)').matches) { el.textContent = fmtFn(value); return; }
+    const t0 = performance.now(); cancelAnimationFrame(el._raf);
+    const step = now => { const t = Math.min(1, (now - t0) / ms), e = 1 - Math.pow(1 - t, 3); el.textContent = fmtFn(from + (value - from) * e); if (t < 1) el._raf = requestAnimationFrame(step); };
+    el._raf = requestAnimationFrame(step);
   }
   try { const t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
 
@@ -94,5 +140,5 @@
   const inputsOf = st => ({ S: st.S, K: st.K, r: st.r, q: st.q, v: st.v, T: st.T });
   const debounce = (fn, ms = 120) => { let h; return (...a) => { clearTimeout(h); h = setTimeout(() => fn(...a), ms); }; };
 
-  global.UI = { FIELDS, DEFAULTS, loadState, saveState, shareLink, toast, nav, inputs, kindToggle, fmt, pct, money, inputsOf, debounce };
+  global.UI = { FIELDS, DEFAULTS, loadState, saveState, shareLink, toast, nav, inputs, kindToggle, fmt, pct, money, inputsOf, debounce, animateNumber, reveal };
 })(window);

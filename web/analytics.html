@@ -1,0 +1,405 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Analytics · Black-Scholes</title>
+<meta name="description" content="Heatmaps, the terminal distribution, an option chain, implied vol and a comparison of pricing methods.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>σ</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/style.css">
+<style>
+[hidden]{display:none!important}
+.panel-actions{display:flex;gap:8px;margin-top:14px}
+.chart-card{padding:20px 20px 14px}
+.chart-card .note{margin-top:10px}
+.ctl{display:flex;gap:12px 20px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px}
+.ctl label{display:flex;flex-direction:column;gap:5px;font-size:12.5px;color:var(--text-2);font-weight:500;min-width:0}
+.ctl label.check{flex-direction:row;align-items:center;font-size:14px;padding-bottom:6px}
+.ctl label.range{min-width:180px}
+.ctl label.range b{color:var(--text);font-weight:500}
+.ctl input[type=number]{width:84px}
+.ctl select{max-width:180px}
+.paths path{opacity:.35}
+.smile{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:10px;margin-bottom:14px}
+.smile label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--text-2)}
+.smile input{width:100%}
+.hero .side div{margin-top:2px}
+</style>
+</head><body><div class="wrap">
+  <section class="page-head"><h1>Analytics</h1><p>Heatmaps, the terminal distribution, an option chain, implied vol and a comparison of pricing methods, all driven by the inputs on the left.</p></section>
+  <main class="layout">
+    <aside class="card pad sticky" id="inputs">
+      <div id="kind"></div>
+      <div id="fields" style="margin-top:8px"></div>
+      <div class="panel-actions"><button class="btn sm" id="share">Copy link</button></div>
+    </aside>
+    <div class="stack">
+      <div class="tabs" id="tabs" role="tablist"></div>
+
+      <div class="stack" data-panel="heat">
+        <section class="card chart-card">
+          <div class="card-head"><div class="card-title" id="heat-title">Heatmap</div></div>
+          <div class="ctl">
+            <label>Metric <select id="heat-metric"></select></label>
+            <label>Axes <select id="heat-axes"></select></label>
+            <label>Grid <span class="seg sm" id="heat-n" role="group" aria-label="Grid size"></span></label>
+            <label><span id="heat-ylabel">Vol from</span> <input type="number" id="heat-ymin" step="1"></label>
+            <label>to <input type="number" id="heat-ymax" step="1"></label>
+          </div>
+          <div id="heat1"></div>
+          <p class="note" id="heat-note"></p>
+        </section>
+        <section class="card chart-card">
+          <div class="card-head"><div class="card-title">P&amp;L if you bought it now</div></div>
+          <div id="heat2"></div>
+          <p class="note" id="heat2-note"></p>
+        </section>
+      </div>
+
+      <div class="stack" data-panel="dist" hidden>
+        <section class="card pad" id="dist-empty" hidden><p class="note">The distribution needs time to expiry and volatility above zero.</p></section>
+        <div class="stack" id="dist-body">
+          <div class="tiles" id="dist-tiles"></div>
+          <section class="card chart-card">
+            <div class="card-head"><div class="card-title">Where the spot ends up <span>risk-neutral density of S at expiry</span></div></div>
+            <div id="dist-pdf"></div>
+            <p class="note">Lognormal density implied by the inputs. Shaded bands are the 1σ and 2σ ranges. This is the pricing measure, not a forecast.</p>
+          </section>
+          <section class="card chart-card">
+            <div class="card-head"><div class="card-title">Cumulative <span>P(S at expiry ≤ x)</span></div></div>
+            <div id="dist-cdf"></div>
+            <dl class="kv" id="dist-kv" style="margin-top:14px"></dl>
+          </section>
+        </div>
+      </div>
+
+      <div class="stack" data-panel="chain" hidden>
+        <section class="card chart-card">
+          <div class="card-head"><div class="card-title">Option chain <span id="chain-sub"></span></div><div class="seg sm" id="chain-w" role="group" aria-label="Strike range"></div></div>
+          <div class="scroll" id="chain-table"></div>
+          <p class="note">Strikes every 2.5% of spot. The highlighted row is the strike closest to spot. Theta is per day, vega per 1% of vol. Click a header to sort.</p>
+        </section>
+        <section class="card chart-card">
+          <div class="card-head"><div class="card-title">Delta across strikes</div></div>
+          <div id="chain-delta"></div>
+          <p class="note">Call delta minus put delta is e^(−qT) at every strike, which is put–call parity in derivative form.</p>
+        </section>
+      </div>
+
+      <div class="stack" data-panel="iv" hidden>
+        <section class="card pad" id="iv-empty" hidden><p class="note">Implied vol needs time to expiry above zero.</p></section>
+        <div class="stack" id="iv-body">
+          <section class="card chart-card">
+            <div class="ctl" style="margin-bottom:0">
+              <label>Market price <input type="number" id="iv-market" step="0.01" min="0"></label>
+              <button class="btn sm" id="iv-reset" style="margin-bottom:1px">Use model price</button>
+            </div>
+          </section>
+          <section class="card hero">
+            <div><div class="label">Implied volatility</div><div class="value mono" id="iv-val">—</div><div class="sub" id="iv-sub"></div></div>
+            <div class="side" id="iv-side"></div>
+          </section>
+          <section class="card pad" id="iv-fail" hidden><p class="note" id="iv-reason"></p></section>
+          <section class="card chart-card" id="iv-iter-card">
+            <div class="card-head"><div class="card-title">Newton iterations</div></div>
+            <div class="scroll" id="iv-iter"></div>
+            <p class="note">Each step moves σ by error ÷ vega and falls back to bisection when Newton would leave the bracket.</p>
+          </section>
+          <section class="card chart-card">
+            <div class="card-head"><div class="card-title">Price vs vol</div></div>
+            <div id="iv-curve"></div>
+            <p class="note">Price rises monotonically with vol, so the market price picks out one vol where the curve crosses it.</p>
+          </section>
+          <section class="card chart-card">
+            <div class="card-head"><div class="card-title">Vol smile <span>implied vol at five strikes</span></div></div>
+            <div class="smile" id="smile-inputs"></div>
+            <div id="smile-chart"></div>
+            <p class="note">Defaults are model prices at 20% vol. A flat line means the market agrees with a single vol. Real markets don't.</p>
+          </section>
+        </div>
+      </div>
+
+      <div class="stack" data-panel="models" hidden>
+        <section class="card pad" id="m-empty" hidden><p class="note">The numerical methods need time to expiry and volatility above zero.</p></section>
+        <div class="stack" id="m-body">
+          <section class="card chart-card">
+            <div class="ctl" style="margin-bottom:0">
+              <label class="range">Tree steps <b class="mono" id="m-steps-v">200</b><input type="range" id="m-steps" min="10" max="1000" step="10" value="200"></label>
+              <label>MC paths <select id="m-npaths"><option value="5000">5k</option><option value="20000" selected>20k</option><option value="100000">100k</option></select></label>
+              <label>Seed <input type="number" id="m-seed" value="7" step="1"></label>
+              <label class="check"><input type="checkbox" id="m-am"> American exercise (tree)</label>
+            </div>
+          </section>
+          <div class="tiles" id="m-tiles"></div>
+          <section class="card chart-card">
+            <div class="card-head"><div class="card-title">Binomial convergence</div></div>
+            <div id="m-tree"></div>
+            <p class="note">CRR price as the step count grows. The even/odd oscillation is real, not a bug: the strike sits at different places in the terminal lattice as the parity of the step count flips.</p>
+          </section>
+          <section class="card chart-card">
+            <div class="card-head"><div class="card-title">Monte Carlo convergence</div></div>
+            <div id="m-mc"></div>
+            <p class="note">Running estimate from 16 paths on, with a 95% band (±1.96 standard errors). The error shrinks like 1/√n, so ten times more paths buys one more digit, roughly.</p>
+          </section>
+          <section class="card chart-card">
+            <div class="card-head"><div class="card-title">Simulated spot at expiry</div></div>
+            <div id="m-hist"></div>
+            <p class="note">Histogram of the simulated terminal prices against the lognormal density the closed form assumes.</p>
+          </section>
+          <section class="card chart-card">
+            <div class="card-head"><div class="card-title">Sample paths</div></div>
+            <div id="m-paths" class="paths"></div>
+            <p class="note">30 paths under the risk-neutral measure, drifting at r − q. These are pricing paths, not forecasts.</p>
+          </section>
+          <section class="card chart-card">
+            <div class="card-head"><div class="card-title">PDE solution vs closed form</div></div>
+            <div id="m-pde"></div>
+            <p class="note">Crank–Nicolson on a 300×300 grid out to 4× the larger of S and K. Only 0.3K to 2K is shown.</p>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="assets/bs.js"></script><script src="assets/chart.js"></script><script src="assets/ui.js"></script>
+<script>
+UI.nav('analytics');
+const state = UI.loadState();
+const $ = id => document.getElementById(id);
+const range = (lo, hi, n) => Array.from({ length: n }, (_, i) => lo + (hi - lo) * i / (n - 1));
+const signed = (v, d) => (v < 0 ? '−' : '+') + UI.fmt(Math.abs(v), d);
+const metricName = id => BS.metricById(id).name;
+
+function seg(el, items, current, onPick) {
+  el.innerHTML = items.map(([id, label]) => `<button data-id="${id}" aria-pressed="${id === current}">${label}</button>`).join('');
+  el.querySelectorAll('button').forEach(b => b.onclick = () => { onPick(b.dataset.id); el.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); });
+}
+
+const TABS = [['heat', 'Heatmap'], ['dist', 'Distribution'], ['chain', 'Chain'], ['iv', 'Implied vol'], ['models', 'Models']];
+let tab = 'heat';
+try { tab = localStorage.getItem('bs-analytics-tab') || 'heat'; } catch {}
+if (!TABS.some(t => t[0] === tab)) tab = 'heat';
+$('tabs').innerHTML = TABS.map(t => `<button role="tab" data-tab="${t[0]}">${t[1]}</button>`).join('');
+$('tabs').querySelectorAll('button').forEach(b => b.onclick = () => { tab = b.dataset.tab; try { localStorage.setItem('bs-analytics-tab', tab); } catch {} showTab(); });
+function showTab() {
+  $('tabs').querySelectorAll('button').forEach(b => { b.setAttribute('aria-selected', b.dataset.tab === tab); if (b.dataset.tab === tab) b.scrollIntoView({ block: 'nearest', inline: 'nearest' }); });
+  document.querySelectorAll('[data-panel]').forEach(p => p.hidden = p.dataset.panel !== tab);
+  render();
+}
+
+// ---------- Heatmap ----------
+const AXES = {
+  sv: { name: 'Spot × Vol', x: 'S', y: 'v', yDef: [0.05, 0.8], pct: true },
+  st: { name: 'Spot × Time', x: 'S', y: 'T', yDef: [0.05, 2], pct: false },
+  kv: { name: 'Strike × Vol', x: 'K', y: 'v', yDef: [0.05, 0.8], pct: true },
+  sr: { name: 'Spot × Rate', x: 'S', y: 'r', yDef: [-0.02, 0.15], pct: true },
+};
+const AXIS_LABEL = { S: 'Spot', K: 'Strike', v: 'Vol', T: 'Time', r: 'Rate' };
+const heat = { metric: 'price', axes: 'sv', n: 11, ymin: 0.05, ymax: 0.8 };
+$('heat-metric').innerHTML = BS.METRICS.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+$('heat-axes').innerHTML = Object.entries(AXES).map(([id, a]) => `<option value="${id}">${a.name}</option>`).join('');
+$('heat-metric').onchange = e => { heat.metric = e.target.value; render(); };
+$('heat-axes').onchange = e => { heat.axes = e.target.value; setHeatRange(AXES[heat.axes].yDef); render(); };
+seg($('heat-n'), [[7, '7'], [11, '11'], [15, '15']], String(heat.n), id => { heat.n = +id; render(); });
+function setHeatRange([lo, hi]) {
+  const a = AXES[heat.axes]; heat.ymin = lo; heat.ymax = hi;
+  $('heat-ylabel').textContent = AXIS_LABEL[a.y] + (a.pct ? ' (%) from' : ' (yr) from');
+  $('heat-ymin').value = a.pct ? +(lo * 100).toFixed(4) : lo; $('heat-ymax').value = a.pct ? +(hi * 100).toFixed(4) : hi;
+  $('heat-ymin').step = $('heat-ymax').step = a.pct ? 1 : 0.05;
+}
+['heat-ymin', 'heat-ymax'].forEach(id => $(id).oninput = e => {
+  const raw = parseFloat(e.target.value); if (!Number.isFinite(raw)) return;
+  heat[id === 'heat-ymin' ? 'ymin' : 'ymax'] = AXES[heat.axes].pct ? raw / 100 : raw; render();
+});
+setHeatRange(AXES.sv.yDef);
+
+function renderHeat(o, kind, res) {
+  const a = AXES[heat.axes], n = heat.n, base = o[a.x];
+  const xs = range(0.6 * base, 1.4 * base, n); xs[(n - 1) / 2] = base;
+  let [lo, hi] = [Math.min(heat.ymin, heat.ymax), Math.max(heat.ymin, heat.ymax)];
+  if (hi - lo < 1e-9) hi = lo + (a.pct ? 0.01 : 0.05);
+  const ys = range(lo, hi, n), cy = o[a.y];
+  let mark = { x: base, y: NaN };
+  if (cy >= lo && cy <= hi) { let j = 0; ys.forEach((y, i) => { if (Math.abs(y - cy) < Math.abs(ys[j] - cy)) j = i; }); ys[j] = cy; mark.y = cy; }
+  const at = (x, y) => BS.price({ ...o, [a.x]: x, [a.y]: y }, kind);
+  const z = ys.map(y => xs.map(x => BS.metric(at(x, y), heat.metric)));
+  const flat = z.flat().filter(Number.isFinite), zmin = Math.min(...flat), zmax = Math.max(...flat);
+  const isPrice = heat.metric === 'price';
+  const digits = isPrice ? 2 : Math.max(...flat.map(Math.abs)) < 0.01 ? 5 : 4;
+  const cellW = ($('heat1').clientWidth - 44) / n, showValues = cellW >= (isPrice ? 34 : 46);
+  const labelled = new Set(xs.filter((_, i) => cellW >= 40 || i % 2 === 0));
+  const xFmt = v => labelled.has(v) ? Chart.short(v) : '';
+  const yFmt = a.pct ? v => UI.pct(v, a.y === 'r' ? 1 : 0) : v => UI.fmt(v, 2);
+  const common = { xs, ys, xFmt, yFmt, xLabel: AXIS_LABEL[a.x], yLabel: AXIS_LABEL[a.y], mark, showValues };
+  Chart.heatmap($('heat1'), { ...common, z, zFmt: v => UI.fmt(v, digits), diverging: zmin < 0 && zmax > 0 });
+  $('heat-title').innerHTML = `${metricName(heat.metric)} <span>${a.name.toLowerCase()}</span>`;
+  $('heat-note').textContent = `${kind === 'call' ? 'Call' : 'Put'} ${metricName(heat.metric).toLowerCase()} on a ${n}×${n} grid, ${AXIS_LABEL[a.x].toLowerCase()} from 0.6× to 1.4× the current value. The outlined cell is the current inputs.` + (showValues ? '' : ' Hover a cell for its value.');
+  const z2 = ys.map(y => xs.map(x => at(x, y).price - res.price));
+  Chart.heatmap($('heat2'), { ...common, z: z2, zFmt: v => signed(v, 2), diverging: true });
+  $('heat2-note').textContent = `Model price at each point minus today's price of ${UI.money(res.price, 2)}, per option, for a long position. Flip the sign if you sold it.`;
+}
+
+// ---------- Distribution ----------
+function renderDist(o, kind, res) {
+  const p = BS.probabilities(o, kind);
+  $('dist-empty').hidden = !!p; $('dist-body').hidden = !p;
+  if (!p) return;
+  const call = kind === 'call';
+  const tiles = [
+    ['P(ITM)', UI.pct(p.pITM, 1), call ? 'N(d₂): ends above K' : 'N(−d₂): ends below K'],
+    ['P(touch)', UI.pct(p.pTouch, 1), 'trades through K before expiry'],
+    ['1σ move', '±' + UI.money(p.expectedMove, 2), '±' + UI.pct(p.expectedMove / o.S, 1) + ', S·σ·√T'],
+    ['Breakeven', UI.money(p.breakeven, 2), call ? 'K + premium' : 'K − premium'],
+    ['P(profit)', UI.pct(p.pProfit, 1), 'long one option, held to expiry'],
+    ['|Δ| as probability', UI.pct(p.deltaAsProb, 1), 'the trader\'s rough proxy for P(ITM)'],
+  ];
+  $('dist-tiles').innerHTML = tiles.map(([k, v, d]) => `<div class="tile"><div class="k">${k}</div><div class="v mono">${v}</div><div class="d">${d}</div></div>`).join('');
+  const xs = range(0.3 * o.S, 2.2 * o.S, 241);
+  const vlines = [{ x: o.S, label: 'S' }, { x: o.K, label: 'K', color: 'var(--s2)' }, { x: p.breakeven, label: 'BE', color: 'var(--s3)' }];
+  const bands = [{ x0: p.range2[0], x1: p.range2[1], label: '2σ' }, { x0: p.range1[0], x1: p.range1[1], label: '1σ' }];
+  Chart.line($('dist-pdf'), { series: [{ name: 'Density', points: xs.map(x => [x, p.density(x)]), area: 'zero' }],
+    x: { label: 'Spot at expiry', fmt: Chart.short }, y: { fmt: v => v.toPrecision(2), tipFmt: v => v.toExponential(3) }, vlines, bands, height: 280 });
+  Chart.line($('dist-cdf'), { series: [{ name: 'P(S ≤ x)', points: xs.map(x => [x, p.cdf(x)]) }],
+    x: { label: 'Spot at expiry', fmt: Chart.short }, y: { fmt: v => UI.pct(v, 0), tipFmt: v => UI.pct(v, 2), domain: [0, 1] },
+    vlines: vlines.slice(0, 2), hlines: [{ y: 0.5, label: '50%' }], height: 240 });
+  const kv = [['Median S at expiry', UI.money(p.median, 2)], ['Mean S at expiry (forward)', UI.money(p.mean, 2)],
+    ['1σ range', `${UI.money(p.range1[0], 2)} – ${UI.money(p.range1[1], 2)}`], ['2σ range', `${UI.money(p.range2[0], 2)} – ${UI.money(p.range2[1], 2)}`],
+    ['d₁', UI.fmt(p.d1, 4)], ['d₂', UI.fmt(p.d2, 4)]];
+  $('dist-kv').innerHTML = kv.map(([k, v]) => `<dt>${k}</dt><dd class="mono">${v}</dd>`).join('');
+}
+
+// ---------- Chain ----------
+const chain = { w: 0.3 };
+seg($('chain-w'), [[0.15, '±15%'], [0.3, '±30%'], [0.5, '±50%']], String(chain.w), id => { chain.w = +id; render(); });
+function renderChain(o, kind, res) {
+  const S = o.S, rnd = S >= 20 ? 0.5 : 0.1, m = Math.round(chain.w / 0.025);
+  const strikes = [];
+  for (let i = -m; i <= m; i++) { const K = +(Math.round(S * (1 + i * 0.025) / rnd) * rnd).toFixed(2); if (K > 0 && !strikes.includes(K)) strikes.push(K); }
+  const rows = strikes.map(K => {
+    const c = BS.price({ ...o, K }, 'call'), p = BS.price({ ...o, K }, 'put');
+    return { K, m: S / K, cp: c.price, cd: c.delta, cg: c.gamma, ct: BS.metric(c, 'theta'), cv: BS.metric(c, 'vega'), pp: p.price, pd: p.delta, pt: BS.metric(p, 'theta'), pv: BS.metric(p, 'vega') };
+  });
+  const atm = rows.reduce((a, b) => Math.abs(b.K - S) < Math.abs(a.K - S) ? b : a);
+  const f2 = v => UI.fmt(v, 2), f4 = v => UI.fmt(v, 4);
+  Chart.table($('chain-table'), {
+    columns: [{ key: 'K', label: 'Strike', fmt: f2 }, { key: 'm', label: 'S/K', fmt: v => UI.fmt(v, 3) },
+      { key: 'cp', label: 'Call', fmt: f4 }, { key: 'cd', label: 'Call Δ', fmt: f4 }, { key: 'cg', label: 'Call Γ', fmt: f4 }, { key: 'ct', label: 'Call Θ/day', fmt: f4 }, { key: 'cv', label: 'Call ν', fmt: f4 },
+      { key: 'pp', label: 'Put', fmt: f4 }, { key: 'pd', label: 'Put Δ', fmt: f4 }, { key: 'pt', label: 'Put Θ/day', fmt: f4 }, { key: 'pv', label: 'Put ν', fmt: f4 }],
+    rows, highlight: r => r === atm, sortable: true,
+  });
+  $('chain-sub').textContent = `${rows.length} strikes, ${UI.fmt(o.T, 2)}y, ${UI.pct(o.v, 1)} vol`;
+  Chart.line($('chain-delta'), {
+    series: [{ name: 'Call Δ', points: rows.map(r => [r.K, r.cd]), color: Chart.color(0) }, { name: 'Put Δ', points: rows.map(r => [r.K, r.pd]), color: Chart.color(1) }],
+    x: { label: 'Strike', fmt: Chart.short }, y: { fmt: v => UI.fmt(v, 2), tipFmt: v => UI.fmt(v, 4) }, vlines: [{ x: S, label: 'S' }], legend: true, height: 260,
+  });
+}
+
+// ---------- Implied vol ----------
+const iv = { touched: false, market: NaN, sig: '', smile: [] };
+$('iv-market').oninput = e => { const v = parseFloat(e.target.value); if (!Number.isFinite(v)) return; iv.touched = true; iv.market = v; render(); };
+$('iv-reset').onclick = () => { iv.touched = false; render(); };
+function renderIV(o, kind, res) {
+  $('iv-empty').hidden = o.T > 0; $('iv-body').hidden = !(o.T > 0);
+  if (!(o.T > 0)) return;
+  if (!iv.touched) { iv.market = +res.price.toFixed(2); $('iv-market').value = iv.market; }
+  const sol = BS.impliedVol(o, kind, iv.market);
+  const solved = sol.ok ? BS.price({ ...o, v: sol.vol }, kind) : null;
+  $('iv-val').textContent = sol.ok ? UI.pct(sol.vol, 2) : '—';
+  $('iv-sub').innerHTML = sol.ok ? `market <b class="mono">${UI.money(iv.market, 2)}</b> · model at that vol <b class="mono">${UI.fmt(solved.price, 4)}</b> · <b class="mono">${sol.iterations.length}</b> iterations` : 'no solution';
+  $('iv-side').innerHTML = [['input vol', UI.pct(o.v, 2)], ['model price', UI.fmt(res.price, 4)], ['vega at solution', solved ? UI.fmt(BS.metric(solved, 'vega'), 4) : '—']]
+    .map(([k, v]) => `<div>${k} <b class="mono">${v}</b></div>`).join('');
+  $('iv-fail').hidden = sol.ok; $('iv-iter-card').hidden = !sol.ok;
+  if (!sol.ok) $('iv-reason').textContent = `No implied vol: the market price is ${sol.reason}. ${sol.reason === 'below intrinsic' ? 'No positive vol can produce a price below the discounted intrinsic value.' : 'Even at 500% vol the model gives less than that.'}`;
+  else Chart.table($('iv-iter'), {
+    columns: [{ key: 'i', label: 'Step' }, { key: 'sigma', label: 'σ', fmt: v => UI.pct(v, 4) }, { key: 'price', label: 'Model price', fmt: v => UI.fmt(v, 6) },
+      { key: 'diff', label: 'Error', fmt: v => (v < 0 ? '−' : '') + Math.abs(v).toExponential(2), cls: v => v < 0 ? 'neg' : 'pos' }, { key: 'vega', label: 'Vega (per 1.0)', fmt: v => UI.fmt(v, 4) }],
+    rows: sol.iterations,
+  });
+  const vs = range(0.01, 1.5, 150);
+  Chart.line($('iv-curve'), { series: [{ name: 'Model price', points: vs.map(v => [v, BS.price({ ...o, v }, kind).price]) }],
+    x: { label: 'Vol', fmt: v => UI.pct(v, 0) }, y: { fmt: Chart.short, tipFmt: v => UI.fmt(v, 4) },
+    hlines: [{ y: iv.market, label: 'market ' + UI.money(iv.market, 2) }], markers: sol.ok ? [{ x: sol.vol, y: iv.market, label: UI.pct(sol.vol, 1) }] : [], height: 280 });
+
+  const mult = [0.8, 0.9, 1, 1.1, 1.2], strikes = mult.map(k => o.S * k), sig = [o.S, o.T, o.r, o.q, kind].join();
+  if (sig !== iv.sig) {
+    iv.sig = sig; iv.smile = strikes.map(K => +BS.price({ ...o, K, v: 0.2 }, kind).price.toFixed(2));
+    $('smile-inputs').innerHTML = strikes.map((K, i) => `<label>K ${UI.money(K, 1)} <input type="number" step="0.01" min="0" data-i="${i}" value="${iv.smile[i]}"></label>`).join('');
+    $('smile-inputs').querySelectorAll('input').forEach(inp => inp.oninput = () => { const v = parseFloat(inp.value); if (Number.isFinite(v)) { iv.smile[+inp.dataset.i] = v; render(); } });
+  }
+  const pts = strikes.map((K, i) => [K, BS.impliedVol({ ...o, K }, kind, iv.smile[i]).vol]).filter(p => Number.isFinite(p[1]));
+  const ys = pts.map(p => p[1]), lo = Math.max(0, Math.min(...ys, o.v) - 0.05), hi = Math.max(...ys, o.v) + 0.05;
+  Chart.line($('smile-chart'), { series: [{ name: 'Implied vol', points: pts, color: Chart.color(2) }], markers: pts.map(p => ({ x: p[0], y: p[1], color: Chart.color(2) })),
+    x: { label: 'Strike', fmt: Chart.short }, y: { fmt: v => UI.pct(v, 0), tipFmt: v => UI.pct(v, 2), domain: pts.length ? [lo, hi] : undefined }, vlines: [{ x: o.S, label: 'S' }], height: 220 });
+}
+
+// ---------- Models ----------
+const md = { steps: 200, paths: 20000, seed: 7, american: false, cache: null };
+$('m-steps').oninput = e => { md.steps = +e.target.value; $('m-steps-v').textContent = md.steps; render(); };
+$('m-npaths').onchange = e => { md.paths = +e.target.value; render(); };
+$('m-seed').oninput = e => { const v = parseInt(e.target.value, 10); if (Number.isFinite(v)) { md.seed = v; render(); } };
+$('m-am').onchange = e => { md.american = e.target.checked; render(); };
+const computeModels = UI.debounce(() => {
+  const o = UI.inputsOf(state), kind = state.kind, cf = BS.price(o, kind).price, N = md.steps;
+  const sizes = [...new Set(range(0, Math.log(N), 60).map(l => Math.round(Math.exp(l))))];
+  md.cache = {
+    o, kind, cf, N,
+    tree: BS.binomial(o, kind, N, md.american), euro: md.american ? BS.binomial(o, kind, N, false) : NaN,
+    mc: BS.monteCarlo(o, kind, md.paths, md.seed), cn: BS.crankNicolson(o, kind, 300, 300),
+    conv: sizes.map(n => [n, BS.binomial(o, kind, n, md.american)]),
+    paths: BS.samplePaths(o, 30, 100, md.seed), prob: BS.probabilities(o, kind),
+  };
+  drawModels();
+}, 150);
+function renderModels(o, kind, res, redraw) {
+  const ok = o.T > 0 && o.v > 0;
+  $('m-empty').hidden = ok; $('m-body').hidden = !ok;
+  if (!ok) return;
+  if (redraw && md.cache) drawModels(); else computeModels();
+}
+function drawModels() {
+  const c = md.cache, { cf, o, kind } = c, K = o.K;
+  let tiles = `<div class="tile"><div class="k">Closed form</div><div class="v mono">${UI.fmt(cf, 4)}</div><div class="d">Black-Scholes, the reference</div></div>
+    <div class="tile"><div class="k">Binomial${md.american ? ' <i>American</i>' : ''}</div><div class="v mono">${UI.fmt(c.tree, 4)}</div><div class="d">CRR, ${c.N} steps · ${signed(c.tree - cf, 4)}</div></div>
+    <div class="tile"><div class="k">Monte Carlo</div><div class="v mono">${UI.fmt(c.mc.price, 4)}</div><div class="d">${Chart.short(md.paths)} paths, ± ${UI.fmt(c.mc.se, 4)} SE · ${signed(c.mc.price - cf, 4)}</div></div>
+    <div class="tile"><div class="k">Crank–Nicolson</div><div class="v mono">${UI.fmt(c.cn.price, 4)}</div><div class="d">300×300 grid · ${signed(c.cn.price - cf, 4)}</div></div>`;
+  if (md.american) tiles += `<div class="tile"><div class="k">Early exercise premium</div><div class="v mono">${UI.fmt(c.tree - c.euro, 4)}</div><div class="d">American − European, same tree</div></div>`;
+  $('m-tiles').innerHTML = tiles;
+  const logFmt = v => Chart.short(Math.pow(10, v));
+  Chart.line($('m-tree'), { series: [{ name: 'Tree price', points: c.conv.map(([n, v]) => [Math.log10(n), v]) }],
+    x: { label: 'Steps', fmt: logFmt }, y: { fmt: Chart.short, tipFmt: v => UI.fmt(v, 4), includeZero: false }, hlines: [{ y: cf, label: 'closed form' }], height: 260 });
+  const conv = c.mc.conv.filter(p => p.n >= 16);
+  Chart.line($('m-mc'), { series: [
+      { name: 'Estimate', points: conv.map(p => [Math.log10(p.n), p.est]) },
+      { name: '+1.96·SE', points: conv.map(p => [Math.log10(p.n), p.est + 1.96 * p.se]), dash: '4 3', color: Chart.color(3), width: 1.5 },
+      { name: '−1.96·SE', points: conv.map(p => [Math.log10(p.n), p.est - 1.96 * p.se]), dash: '4 3', color: Chart.color(3), width: 1.5 }],
+    x: { label: 'Paths', fmt: logFmt }, y: { fmt: Chart.short, tipFmt: v => UI.fmt(v, 4), includeZero: false }, hlines: [{ y: cf, label: 'closed form' }], legend: true, height: 260 });
+  Chart.histogram($('m-hist'), { values: c.mc.terminal, bins: 60, xFmt: Chart.short, xLabel: 'Spot at expiry', overlay: c.prob ? c.prob.density : null, vlines: [{ x: K, label: 'K' }], height: 240 });
+  const ps = c.paths;
+  Chart.line($('m-paths'), { series: ps.paths.map((p, i) => ({ name: 'Path ' + (i + 1), points: p.map((s, j) => [ps.times[j], s]), width: 1, color: Chart.color(0) })),
+    x: { label: 'Years', fmt: v => UI.fmt(v, 2) }, y: { fmt: Chart.short, includeZero: false }, hlines: [{ y: K, label: 'K' }], height: 280,
+    tooltip: (x, rows) => { const ys = rows.map(r => r.y).filter(Number.isFinite).sort((a, b) => a - b); return `<div class="t">t = ${UI.fmt(x, 2)}y</div><div class="r"><span>Low</span><b>${UI.fmt(ys[0], 2)}</b></div><div class="r"><span>Median</span><b>${UI.fmt(ys[ys.length >> 1], 2)}</b></div><div class="r"><span>High</span><b>${UI.fmt(ys[ys.length - 1], 2)}</b></div>`; } });
+  const idx = c.cn.grid.map((s, i) => i).filter(i => c.cn.grid[i] >= 0.3 * K && c.cn.grid[i] <= 2 * K);
+  const pay = s => kind === 'call' ? Math.max(s - K, 0) : Math.max(K - s, 0);
+  Chart.line($('m-pde'), { series: [
+      { name: 'Crank–Nicolson', points: idx.map(i => [c.cn.grid[i], c.cn.values[i]]) },
+      { name: 'Closed form', points: idx.map(i => [c.cn.grid[i], BS.price({ ...o, S: Math.max(c.cn.grid[i], 1e-9) }, kind).price]), dash: '4 3', color: Chart.color(1) },
+      { name: 'Payoff at expiry', points: idx.map(i => [c.cn.grid[i], pay(c.cn.grid[i])]), width: 1, color: Chart.color(2) }],
+    x: { label: 'Spot', fmt: Chart.short }, y: { fmt: Chart.short, tipFmt: v => UI.fmt(v, 4) }, vlines: [{ x: o.S, label: 'S' }], legend: true, height: 280 });
+}
+
+// ---------- Wiring ----------
+const RENDER = { heat: renderHeat, dist: renderDist, chain: renderChain, iv: renderIV, models: renderModels };
+function render(redraw = false) {
+  const o = UI.inputsOf(state), res = BS.price(o, state.kind);
+  RENDER[tab](o, state.kind, res, redraw);
+}
+function onChange() { UI.saveState(state); render(); }
+UI.kindToggle($('kind'), state, onChange);
+UI.inputs($('fields'), state, onChange);
+$('share').onclick = UI.shareLink;
+UI.saveState(state);
+showTab();
+const redraw = UI.debounce(() => render(true), 80);
+addEventListener('resize', redraw);
+addEventListener('themechange', () => render(true));
+</script>
+</body></html>
