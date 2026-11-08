@@ -1,61 +1,68 @@
 # black-scholes
 
-Black-Scholes pricing and Greeks for European options, written from scratch in plain `math`, with a small site on top.
+[![tests](https://github.com/michae6345-crypto/black-scholes-calculator/actions/workflows/tests.yml/badge.svg)](https://github.com/michae6345-crypto/black-scholes-calculator/actions/workflows/tests.yml)
 
-## Site
+A Python library for pricing European options under the Black-Scholes model. It has no third-party dependencies; everything is built on the standard library's `math` module.
 
-- **Pricer** (`/`): price a call or put and see every Greek, first through third order, with curves against spot, vol, rate and time.
-- **Analytics** (`/analytics`): implied vol, risk-neutral probabilities, and the closed form checked against a binomial tree, Crank-Nicolson and Monte Carlo.
-- **Strategies** (`/strategies`): multi-leg positions (spreads, straddles, condors, collars) with payoff, P&L over time, net Greeks and probability of profit.
-- **Math** (`/math`): the model, the formulas, and where each Greek comes from.
+It covers:
 
-Hosted on Vercel. To run it yourself, open `web/index.html` directly or serve the folder:
+- Call and put prices, with a continuous dividend yield.
+- 17 Greeks in closed form, up to third order (speed, zomma, color, ultima).
+- A Crank-Nicolson finite-difference solver for the Black-Scholes PDE. It uses a 400 x 400 grid by default and solves each time step with a tridiagonal (Thomas) solve. It exists to check the closed form.
+- Implied volatility by Newton's method on vega, falling back to bisection when a Newton step leaves the bracket.
 
-```
-python3 -m http.server 8000 -d web
-```
+## Install
 
-## Python
+Requires Python 3.10 or newer.
 
 ```
+git clone https://github.com/michae6345-crypto/black-scholes-calculator.git
+cd black-scholes-calculator
 pip install -e .
 ```
 
+## Usage
+
 ```python
-from blackscholes import Option, call_price, all_greeks
+from blackscholes import Option, call_price, put_price, delta, gamma, speed, implied_vol, pde_price
 
-o = Option(spot=100, strike=100, rate=0.05, vol=0.2, time=1)
-call_price(o)          # 10.4506
-all_greeks(o, "call")  # {'delta': 0.6368, 'gamma': 0.0188, 'theta': -6.414, 'vega': 37.524, 'rho': 53.232, 'epsilon': -63.683, ...}
+o = Option(spot=100, strike=100, rate=0.05, vol=0.2, time=1.0)
+
+print(round(call_price(o), 4))                    # 10.4506
+print(round(put_price(o), 4))                     # 5.5735
+print(round(delta(o, "call"), 4))                 # 0.6368
+print(round(gamma(o), 4))                         # 0.0188
+print(round(speed(o), 6))                         # -0.000516
+print(round(implied_vol(o, "call", 10.4506), 4))  # 0.2
+print(round(pde_price(o, "call"), 4))             # 10.4481
 ```
 
-From the terminal:
+`all_greeks(o, "call")` returns every Greek in a dict. Each one is also a plain function: `delta`, `gamma`, `theta`, `vega`, `rho`, `epsilon`, `lambda_`, `vanna`, `charm`, `vomma`, `veta`, `dual_delta`, `dual_gamma`, `speed`, `zomma`, `color`, `ultima`.
+
+Values are raw partial derivatives. Theta, charm, veta and color are per year. Vega, rho, epsilon and the vol Greeks are per unit of the input (1.0 = 100%).
+
+From the command line:
 
 ```
-python3 -m blackscholes call --spot 100 --strike 100 --rate 0.05 --vol 0.2 --time 1
+python -m blackscholes call --spot 100 --strike 100 --rate 0.05 --vol 0.2 --time 1
 ```
-
-Every Greek in `all_greeks` is also a plain function: `delta`, `gamma`, `theta`, `vega`, `rho`, `epsilon`, `lambda_`, `vanna`, `charm`, `vomma`, `veta`, `dual_delta`, `dual_gamma`, `speed`, `zomma`, `color`, `ultima`.
-
-Units: the library returns raw partial derivatives. Theta, charm, color and veta are per year; vega, rho, epsilon and the vol Greeks are per unit (1.0 = 100%). The site divides these for display (per day, per 1%).
-
-On Windows, use `python` instead of `python3`, and `;` instead of `&&` in PowerShell.
-
-## Numerical methods
-
-- Implied vol: Newton's method on vega, with bisection when a step leaves the bracket.
-- Binomial: Cox-Ross-Rubinstein tree, with optional American early exercise (site only).
-- PDE: Crank-Nicolson finite differences on the Black-Scholes equation, used to check the closed form.
-- Monte Carlo: terminal-price simulation with antithetic variates and a fixed seed (site only).
 
 ## Tests
 
 ```
-pip install pytest
+pip install -e ".[dev]"
 pytest
 ```
 
-The tests check prices against textbook values and put-call parity, compare every Greek to a central finite-difference bump of the next lower-order quantity, check the higher-order Greeks against the JS port, and confirm the PDE solver lands on the closed form.
+117 tests. They check:
+
+- prices against textbook values and put-call parity
+- each Greek against a central finite difference of the price or of the next lower-order Greek
+- higher-order Greek values against reference numbers from the JavaScript port in `web/assets/bs.js`
+- implied vol recovering the input vol for calls and puts
+- the PDE solver landing within 0.02 of the closed form
+
+GitHub Actions runs the suite on Python 3.11 and 3.12 for every push and pull request.
 
 ## Layout
 
@@ -64,14 +71,16 @@ blackscholes/
   option.py        Option dataclass and input validation
   normal.py        normal pdf and cdf
   pricing.py       d1, d2, call and put prices
-  greeks.py        all Greeks in closed form
+  greeks.py        Greeks in closed form
   implied_vol.py   Newton + bisection
   pde.py           Crank-Nicolson solver
   cli.py           python -m blackscholes
 tests/
-web/
-  index.html       the site
-  assets/bs.js     JS port of the math, plus tree, PDE, Monte Carlo and strategies
-  assets/ui.js     shared page chrome and state
-  assets/chart.js  charts
+web/               static site: pricer, analytics, strategies, math pages
+```
+
+The site in `web/` uses a JavaScript port of the same math (`web/assets/bs.js`), plus a binomial tree and Monte Carlo pricer that exist only there. To run it locally:
+
+```
+python3 -m http.server 8000 -d web
 ```
